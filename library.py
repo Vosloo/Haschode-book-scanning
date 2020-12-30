@@ -5,5 +5,8 @@ class Library:
         self.daily_scans = daily_scans
         self.books = []
 
+    def __repr__(self):
+        return f"Library: {self.book_count} {self.sign_proc} {self.daily_scans}"
+
     def set_books(self, books):
         self.books = books

@@ -6,9 +6,18 @@ class Storage:
         self.file_name = file_name
         self.book_count = 0
         self.lib_count = 0
-        self.days = 0
+        self.days_avail = 0
         self.weights = []
+
+        self.cur_day = 0
+        # Library currently_signing
+        self.currently_signing = -1
+        
+        # TODO:
+        # signed libraries, cur day, scanned should all be local to a given population...
+
         self.scanned = []
+        self.signed_libs = []
         self.libraries: list[Library] = []
         self.read_input()
 
@@ -18,11 +27,11 @@ class Storage:
     def read_input(self):
         with open(self.file_name, "r") as f:
             # Scanning info
-            self.book_count, self.lib_count, self.days = list(
+            self.book_count, self.lib_count, self.days_avail = list(
                 map(int, f.readline().split())
             )
             self.weights = list(map(int, f.readline().split()))
-            self.scanned = [False] * len(self.weights)
+            # self.scanned = [False] * len(self.weights)
 
             library_ind = 0
             for line in f:
@@ -38,3 +47,6 @@ class Storage:
                     list(map(int, f.readline().split()))
                 )
                 library_ind += 1
+
+    def add_scanned_book(self, book):
+        self.scanned.append(book)

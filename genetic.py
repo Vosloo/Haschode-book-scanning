@@ -2,14 +2,15 @@ from library import Library
 import os
 from random import sample, uniform, randint
 from typing import List
+from tqdm import tqdm
 
 from storage import Storage
 from solution import Solution
 
 
 data_dir = 'data/'
-pop_size = 100
-generations = 10
+pop_size = 2000
+generations = 20
 mutation_chance = 5 # in %
 
 
@@ -49,107 +50,28 @@ def mutation(child: Solution):
             child[first], child[second] = child[second], child[first]
 
 
-def _get_books(storage: Storage):
-    """
-    Scans best books from already signed libraries, picking the best ones and
-    from the libraries according to the order they were signed, increments
-    current day and returns score of scanned books.
-    """
-    score = 0
-    for signed_lib in storage.signed_libs:
-        no_books = storage[signed_lib].daily_scans
-
-        available_books = set(range(len(storage.weights)))
-        available_books -= set(storage.scanned)
-
-        # All books scanned
-        if not available_books:
-            break
-
-        # available_weights = [storage.weights[book] for book in available_books]
-        available_weights = {book: storage.weights[book] for book in available_books}
-        for i in range(no_books):
-            # Get book (not weight) with maximum score
-            book = max(available_weights, key=lambda k: available_weights[k])
-            
-            weight = available_weights[book]
-            score += weight
-            
-            # Add it to already scanned
-            storage.add_scanned_book(book)
-
-            # Delete it from library, not to scan it again
-            del available_weights[book]
-
-    # Increase current day
-    storage.cur_day += 1
-
-    # Decrease left signing time for currently signing library
-    if storage.currently_signing != -1:
-        lib = storage.currently_signing
-        storage[lib].days_to_sign -= 1
-
-        # If signing process has ended...
-        if storage[lib].days_to_sign == 0:
-            storage.currently_signing = -1
-            storage.signed_libs.append(lib)
-
-    return score
-
-
-def _get_score(libraries: List, storage: Storage):
-    """
-    Returns score of libraries based on:
-    current day, days avaialbe, daily scans, position in queue.
-    """
-    score = 0
-    while libraries:
-        lib_ind = libraries[0]
-        # library = storage[lib_ind]
-
-        if storage.currently_signing == -1:
-            storage.currently_signing = lib_ind
-            
-            # Delete currently signing library from queue
-            libraries.pop(0)
-
-        # Get books from already signed libraries
-        score += _get_books(storage)
-
-    # Already signed all libraries (that had enough time for signing)\
-    while storage.cur_day < storage.days_avail and \
-            len(storage.scanned) < storage.book_count:
-        score += _get_books(storage)
-
-    return score
-
-
-def _get_no_libs(storage: Storage, libraries):
-    """
-    Get number of libraries that can be processed during the time we have (days)
-    """
-    cur_days = 0
-    no_libs = 0
-    for lib in libraries:
-        if cur_days + storage[lib].sign_proc >= storage.days_avail:
-            return no_libs
-        
-        cur_days += storage[lib].sign_proc
-        no_libs += 1
-
-    return no_libs
-
-
 def fitness(population: List[Solution], storage: Storage):
-    for ind, pop in enumerate(population):
-        libraries = pop.queue
-        
-        no_libs = _get_no_libs(storage, libraries)
-        libraries = libraries[:no_libs]
-        
-        score = _get_score(libraries, storage)
+    for solution in population:
+        score, cur_time, idx = [0, 0, 0]
+        scanned_books = set()
 
-        population[ind].set_score(score)
+        genotype = solution.queue
+
+        while (idx < len(genotype) and cur_time < storage.days_avail):
+            cur_lib = storage.libraries[genotype[idx]]
+            cur_time += cur_lib.days_to_sign
+            
+            if (cur_time < storage.days_avail):
+                # list of books to be shiped from given library
+                books_avail = [i for i in cur_lib.books if i not in scanned_books][:(storage.days_avail - cur_time) * cur_lib.daily_scans]
+
+                score += sum([storage.weights[i] for i in books_avail])
+
+                scanned_books.update(books_avail)
+            
+            idx += 1
+
+        solution.set_score(score)
 
 
 def selection(population: List[Solution]) -> List[Solution]:
@@ -164,39 +86,88 @@ def selection(population: List[Solution]) -> List[Solution]:
 def select_best(old_pop: List[Solution], new_pop: List[Solution]):
     # Create new population from original and new ones sorting by score
     final_pop = sorted(
-        [*old_pop, *new_pop], key=lambda item: item.score, reverse=True
+        old_pop + new_pop, key=lambda item: item.score, reverse=True
     )
 
     # Return only 'n' sized pop as the original one
     return final_pop[:len(old_pop)]
 
 
-if __name__ == "__main__":
-    # for file in os.listdir(data_dir):
-    storage = Storage(data_dir + "a_example.txt")
-    
-    # Create random population
-    population = [
-        Solution(sample(range(0, storage.lib_count), storage.lib_count))
-        for _ in range(pop_size)
-    ]
+def save_solution(solution: Solution, storage: Storage):
+    no_libs = len(solution)
 
-    for no_gen in range(generations):
-        print(no_gen)
-        new_population = []
+    cur_time, idx = [0, 0]
+    scanned_books = set()
+
+    genotype = solution.queue
+
+    libs = []
+    while (idx < no_libs and cur_time < storage.days_avail):
+        cur_lib = storage.libraries[genotype[idx]]
+        cur_time += cur_lib.days_to_sign
+        
+        if (cur_time < storage.days_avail):
+            # list of books to be shiped from given library
+            books_avail = [i for i in cur_lib.books if i not in scanned_books][:(storage.days_avail - cur_time) * cur_lib.daily_scans]
+
+            scanned_books.update(books_avail)
+        
+            libs.append(f"{genotype[idx]} {len(books_avail)}\n")
+            libs.append(" ".join(list(map(str, books_avail))) + '\n')
+
+        idx += 1
+
+    sol_file = storage.file_name.split('/')[1]
+    with open("solutions/" + sol_file, 'w+') as sfile:
+        # no_libs
+        sfile.write(f"{int(len(libs) / 2)}\n")
+        sfile.writelines(libs)
+
+
+if __name__ == "__main__":
+    total_score = 0
+    for FILE in os.listdir('./data'):
+        # Skip non-input files and d (since that's too slow)
+        if not FILE.endswith('.txt'):# or FILE.startswith('d'):
+            continue
+
+        storage = Storage(data_dir + FILE)
+
+        print(data_dir + FILE)
+    
+        # Create random population
+        population = [
+            Solution(sample(range(storage.lib_count), storage.lib_count))
+            for _ in range(pop_size)
+        ]
 
         # Set score for every library
         fitness(population, storage)
 
-        # Create no pairs of parents for crossover
-        parents = selection(population)
+        # for no_gen in tqdm(range(generations)):
+        #     # print(f"No. gen: {no_gen}")
+        #     new_population = []
 
-        for child in crossover(parents):
-            # Create 'n' children and mutate (some of) them
-            mutation(child)
+        #     # Create no pairs of parents for crossover
+        #     parents = selection(population)
 
-            new_population.append(child)
-        
-        # Select new population from set of old and new one
-        population = select_best(population, new_population)
-        
+        #     for child in crossover(parents):
+        #         # Create 'n' children and mutate (some of) them
+        #         # mutation(child)
+
+        #         new_population.append(child)
+
+        #     fitness(new_population, storage)
+            
+        #     # Select new population from set of old and new one
+        #     population = select_best(population, new_population)
+            
+        best_solution = max(population, key=lambda sol: sol.score)
+
+        save_solution(best_solution, storage)
+
+        total_score += best_solution.score
+
+        print(f"Total score: {best_solution.score}")
+    
+    print(f"Total final score: {total_score}")

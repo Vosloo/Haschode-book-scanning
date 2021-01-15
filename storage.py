@@ -8,14 +8,7 @@ class Storage:
         self.lib_count = 0
         self.days_avail = 0
         self.weights = []
-
-        self.cur_day = 0
-        # Library currently_signing
-        self.currently_signing = -1
         
-        # TODO:
-        # signed libraries, cur day, scanned should all be local to a given population...
-
         self.scanned = []
         self.signed_libs = []
         self.libraries: list[Library] = []

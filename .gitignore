@@ -1,6 +1,6 @@
 __pycache__/
 .vscode/
 *.out
-test*
 output.txt
 try.py
+main.exe

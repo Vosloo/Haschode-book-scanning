@@ -12,5 +12,11 @@ class Solution:
     def __len__(self):
         return len(self.queue)
 
+    def __getitem__(self, key):
+        return self.queue[key]
+
+    def __setitem__(self, key, value):
+        self.queue[key] = value
+
     def set_score(self, score):
         self.score = score

@@ -1,127 +1,126 @@
-# from storage import Storage
-
-data_dir = 'data/'
-# example_a = 'a_example.txt'
-# example_b = 'b_read_on.txt'
-# example_d = 'd_tough_choices.txt'
-
-# if __name__ == "__main__":
-#     storage = Storage(data_dir + example_b)
-
-#     print(storage.book_count, storage.library_count, storage.days)
-#     print(storage.weights)
-#     print(storage.scanned)
-#     for lib in storage.libraries:
-#         print(lib.book_count, lib.sign_proc, lib.daily_scans)
-#         print(lib.books)
-
-
-import numpy as np
-from tqdm import tqdm
 import os
-import warnings
-warnings.filterwarnings('ignore')
+from time import time
+from tqdm import tqdm
+from random import sample
+from typing import List
+
+from library import Library
+from solution import Solution
+from storage import Storage
 
 
-class Library():
-	def __init__(self, total_n_books, signup_time, n_books_day, books):
-		self.total_n_books = total_n_books
-		self.signup_time = signup_time
-		self.n_books_day = n_books_day
-		self.books = books
+data_dir = "data/"
 
 
-for FILE in os.listdir('./data'):
-	# Skip non-input files and d (since that's too slow)
-	if not FILE.endswith('.txt') or not FILE.startswith('d'):
-		continue
-
-	# Read in content of file
-	with open(data_dir + FILE, 'r') as ifp:
-	    lines = ifp.readlines()
-
-	# Convert content to data structures
-	# #Books, #Libraries, #Days 
-	B, L, D = list(map(int, lines[0].strip().split()))
-
-	# Scores of the books (book_scores[i] = score book i)
-	book_scores = list(map(int, lines[1].strip().split()))
-	libraries = list()
-	for line_ix in range(1, len(lines) // 2):
-		# #Books, Signup Time, Throughput
-		N, T, M = list(map(int, lines[line_ix*2].strip().split()))
-
-		# IDs of the books in that library
-		books = set(map(int, lines[line_ix*2 + 1].strip().split()))
-		libraries.append(Library(N, T, M, books))
-
-	# Getting the best remaining books from a library
-	def get_best_books(library, assigned_books, curr_time):
-		# How much time do we have remaining?
-		time = D - library.signup_time - curr_time
-
-		# Sort yet unscanned books by their scores 
-		sorted_books = sorted(library.books - assigned_books, 
-				      key=lambda b: -book_scores[b])
-
-		# Take the maximum number of books that we can still scan
-		return list(sorted_books)[:time*library.n_books_day]
+# returns best books based on their scores, days left and library books bandwidth
+def get_books(lib_books, scanned_books, days_left, lib_bandwidth):
+    return [i for i in lib_books if i not in scanned_books][: days_left * lib_bandwidth]
 
 
-	# Key that we will for our max function
-	def score(library, assigned_books, curr_time, assigned_libraries):
-		if library in assigned_libraries:
-			return float('-inf')
+# returns library with the best score
+def get_library(libraires_left, storage: Storage, days_left, scanned_books):
+    max_library = None
+    max_library_score = float("-inf")
+    books_scores = storage.weights
 
-		# Get best books in remaining time
-		possible_books = get_best_books(library, assigned_books, curr_time)
+    # for idx in libraires_left:
+    #     lib = storage[idx]
 
-		# Score is sum of book scores divided by signup time
-		score = sum([book_scores[k] for k in possible_books])
-		score /= library.signup_time
+    #     avl_books = get_books(
+    #         lib.books,
+    #         scanned_books,
+    #         days_left - lib.days_to_sign,
+    #         lib.daily_scans,
+    #     )
 
-		return score
+    #     lib_score = len(avl_books)
 
-	# Data structures to keep track of what has been done
-	assigned_books = set()
-	curr_time = 0
-	assigned_libraries = set()
+    #     # lib_score = sum(books_scores[i] for i in avl_books) / lib.days_to_sign
 
-	# Data structures to store our results
-	asm_books = []
-	asm_libraries = []
+    #     if lib_score > max_library_score:
+    #         max_library_score = lib_score
+    #         max_library = idx
 
-	# Iteratively take the best possible library and schedule it
-	for _ in tqdm(range(L)):
-		scores = [score(x, assigned_books, curr_time, assigned_libraries)
-			  for x in libraries]
-		best_library = np.argmax(scores)
-		best_books = get_best_books(libraries[best_library], 
-					    assigned_books, curr_time)
+    return 0
 
-		# Break if we pass the deadline or already assigned the library
-		if best_library in assigned_libraries:
-			print("Already assigned")
-			break
 
-		curr_time += libraries[best_library].signup_time
-		if curr_time >= D:
-			print("No time")
-			break
+def greedy(storage: Storage):
+    scanned_books = set()
+    libraires_left = set(range(storage.lib_count))
+    day = 0
+    solution = list()
 
-		asm_books.append(best_books)
-		asm_libraries.append(best_library)
+    for _ in tqdm(range(storage.lib_count)):
 
-		assigned_books = assigned_books.union(set(best_books))
-		assigned_libraries.add(libraries[best_library])
+        next_library = get_library(
+            libraires_left, storage, storage.days_avail - day, scanned_books
+        )
 
-	# Write away results & calculate local score
-	total_score = 0
-	with open('output/{}.out'.format(FILE), 'w+') as ofp:
-		ofp.write(f"{len(asm_libraries)}\n")
-		for i, l in enumerate(asm_libraries):
-			ofp.write(f"{l} {len(asm_books[i])}\n")
-			ofp.write("{}\n".format("" "".join(map(str, asm_books[i]))))
-			total_score += sum([book_scores[x] for x in asm_books[i]])
+        lib = storage[next_library]
 
-	print(FILE, total_score)
+        day += lib.days_to_sign
+
+        if day >= storage.days_avail:
+            break
+
+        libraires_left.discard(next_library)
+        solution.append(next_library)
+
+        scanned_books.update(
+            get_books(
+                lib.books, scanned_books, storage.days_avail - day, lib.daily_scans,
+            )
+        )
+
+    return Solution(solution)
+
+
+def fitness(population: List[Solution], storage: Storage):
+    for solution in population:
+        score, cur_time, idx = [0, 0, 0]
+        scanned_books = set()
+
+        genotype = solution.queue
+
+        while idx < len(genotype) and cur_time < storage.days_avail:
+            cur_lib = storage.libraries[genotype[idx]]
+            cur_time += cur_lib.days_to_sign
+
+            if cur_time < storage.days_avail:
+                # list of books to be shiped from given library
+                books_avail = [i for i in cur_lib.books if i not in scanned_books][
+                    : (storage.days_avail - cur_time) * cur_lib.daily_scans
+                ]
+
+                score += sum([storage.weights[i] for i in books_avail])
+
+                scanned_books.update(books_avail)
+
+            idx += 1
+
+        solution.queue = solution.queue[:idx]
+        solution.set_score(score)
+
+
+if __name__ == "__main__":
+    total_score = 0
+    for FILE in os.listdir("./data"):
+        if not FILE.endswith(".txt"):
+            continue
+
+        storage = Storage(data_dir + FILE)
+
+        print(data_dir + FILE)
+
+        # solution = greedy(storage)
+        if FILE.startswith("d"):
+            solution = Solution(
+                sorted(
+                    list(range(storage.lib_count)),
+                    key=lambda lib_ind: len(storage[lib_ind]),
+                )
+            )
+
+        fitness([solution], storage)
+
+        print(f"{solution.score}")

@@ -1,194 +1,148 @@
-from library import Library
-import os
-from random import sample, uniform, randint
-from typing import List
 from tqdm import tqdm
-from time import time
+from random import sample, random
+from typing import List
+from copy import copy
+import numpy as np
+from math import ceil
 
-from storage import Storage
 from solution import Solution
-
-data_dir = "data/"
-pop_count = 200
-gens = 30
-mutation_chance = 5  # in %
+from storage import Storage
+from greedy import get_books
 
 
-def _cross(pair: List[Solution]) -> Solution:
-    p1, p2 = pair
-
-    first, second = p1.queue, p2.queue
-
-    first_set = set(first)
-    second_set = set(second)
-
-    first += [i for i in second_set if i not in first_set]
-    second += [i for i in first_set if i not in second_set]
-
-    size = len(first)
-
-    start = size // 4
-
-    part2 = first[start : start + size // 2]
-    part2_set = set(part2)
-
-    from_p2 = [i for i in second if i not in part2_set]
-
-    part1, part3 = from_p2[:start], from_p2[start:]
-
-    child = part1 + part2 + part3
-
-    return Solution(child)
-
-
-def crossover(parents) -> Solution:
-    for pair in parents:
-        child = _cross(pair)
-        yield child
-
-
-def mutation(child: Solution):
-    mutate = uniform(1, 100) <= mutation_chance
-    if mutate:
-        # Change <1; 15% * len(child)> positions of libraries
-        count = randint(1, 15 * len(child) // 100)
-
-        to_change = sample(range(len(child)), count * 2)
-        size = len(to_change)
-        for i in range((size // 2) + 1):
-            # Size is always even
-            ind_1, ind_2 = i, int(size / 2) + i - 1
-            first, second = to_change[ind_1], to_change[ind_2]
-            child[first], child[second] = child[second], child[first]
-
-
-def fitness(population: List[Solution], storage: Storage):
-    for solution in population:
-        score, cur_time, idx = [0, 0, 0]
-        scanned_books = set()
-
-        genotype = solution.queue
-
-        while idx < len(genotype) and cur_time < storage.days_avail:
-            cur_lib = storage.libraries[genotype[idx]]
-            cur_time += cur_lib.days_to_sign
-
-            if cur_time < storage.days_avail:
-                # list of books to be shiped from given library
-                books_avail = [i for i in cur_lib.books if i not in scanned_books][
-                    : (storage.days_avail - cur_time) * cur_lib.daily_scans
-                ]
-
-                score += sum([storage.weights[i] for i in books_avail])
-
-                scanned_books.update(books_avail)
-
-            idx += 1
-
-        solution.queue = solution.queue[:idx]
-        solution.set_score(score)
-
-
-def selection(population: List[Solution]) -> List[Solution]:
-    no_pairs = len(population)
-    pairs = []
-    for i in range(no_pairs):
-        pairs.append(sample(population, 2))
-
-    return pairs
-
-
-def select_best(old_pop: List[Solution], new_pop: List[Solution]):
-    # Create new population from original and new ones sorting by score
-    final_pop = sorted(old_pop + new_pop, key=lambda item: item.score, reverse=True)
-
-    # Return only 'n' sized pop as the original one
-    return final_pop[: len(old_pop)]
-
-
-def save_solution(solution: Solution, storage: Storage):
-    no_libs = len(solution)
-
-    cur_time, idx = [0, 0]
-    scanned_books = set()
-
-    genotype = solution.queue
-
-    libs = []
-    while idx < no_libs and cur_time < storage.days_avail:
-        cur_lib = storage.libraries[genotype[idx]]
-        cur_time += cur_lib.days_to_sign
-
-        if cur_time < storage.days_avail:
-            # list of books to be shiped from given library
-            books_avail = [i for i in cur_lib.books if i not in scanned_books][
-                : (storage.days_avail - cur_time) * cur_lib.daily_scans
-            ]
-
-            scanned_books.update(books_avail)
-
-            libs.append(f"{genotype[idx]} {len(books_avail)}\n")
-            libs.append(" ".join(list(map(str, books_avail))) + "\n")
-
-        idx += 1
-
-    sol_file = storage.file_name.split("/")[1]
-    with open("solutions/" + sol_file, "w+") as sfile:
-        # no_libs
-        sfile.write(f"{int(len(libs) / 2)}\n")
-        sfile.writelines(libs)
-
-
-if __name__ == "__main__":
-    total_score = 0
-    for FILE in os.listdir("./data"):
-        if not FILE.endswith(".txt"): # or not FILE.startswith("d"):
-            continue
-        
-        if FILE.startswith('d'):
-            pop_size = 50
-            generations = 20
-        else:
-            pop_size = pop_count
-            generations = gens
-
-        storage = Storage(data_dir + FILE)
-
-        print(data_dir + FILE)
-
-        # Create random population
-        population = [
+# initialization of population [creating first population]
+def initialization(pop_size, storage: Storage, greedy_injection):
+    if greedy_injection:
+        pop = [
+            Solution(sample(range(storage.lib_count), storage.lib_count))
+            for _ in range(pop_size - len(greedy_injection))
+        ]
+        pop.extend(greedy_injection)
+        return pop
+    else:
+        return [
             Solution(sample(range(storage.lib_count), storage.lib_count))
             for _ in range(pop_size)
         ]
 
-        # Set score for every library
-        fitness(population, storage)
+# fitness function
+def fitness(population: List[Solution], storage: Storage):
+    for solution in population:
+        score, day, idx = [0, 0, 0]
+        scanned_books = set()
 
-        for no_gen in tqdm(range(generations)):
-            # print(f"No. gen: {no_gen}")
-            new_population = []
+        while idx < len(solution):
+            lib = storage[solution[idx]]
+            day += lib.signup_time
 
-            # Create no pairs of parents for crossover
-            parents = selection(population)
+            if day >= storage.no_days:
+                break
 
-            for ind, child in enumerate(crossover(parents)):
-                # Create 'n' children and mutate (some of) them
-                # mutation(child)
+            avl_books = get_books(
+                lib.books,
+                scanned_books,
+                storage.no_days - day,
+                lib.no_books_day,
+            )
 
-                new_population.append(child)
+            score += sum([storage.book_scores[i] for i in avl_books])
+            scanned_books.update(avl_books)
+            idx += 1
 
-            fitness(new_population, storage)
+        solution.genotype = solution.genotype[:idx]
+        solution.set_score(score)
 
-            # Select new population from set of old and new one
-            population = select_best(population, new_population)
 
-        best_solution = max(population, key=lambda sol: sol.score)
+# roulette selection of parents
+def parent_selection(pop_size, population: List[Solution]):
+    p = np.array([float(solution.score) for solution in population])
+    p /= p.sum()
+    pop_range = list(range(pop_size))
+    return [
+        np.random.choice(a=pop_range, size=2, replace=False, p=p)
+        for _ in range(pop_size)
+    ]
 
-        save_solution(best_solution, storage)
 
-        total_score += best_solution.score
+# order one crossover
+def crossover(pairs, population: List[Solution]):
+    new_population = list()
 
-        print(f"Total score: {best_solution.score}")
+    for pair in pairs:
+        p1, p2 = copy(population[pair[0]].genotype), copy(population[pair[1]].genotype)
+        p1_set, p2_set = set(p1), set(p2)
 
-    print(f"Total final score: {total_score}")
+        p1 += [i for i in p2_set if i not in p1_set]
+        p2 += [i for i in p1_set if i not in p2_set]
+
+        length = len(p1)
+
+        start = length // 4
+
+        part = p1[start : start + length // 2]
+        part_set = set(part)
+        rest_part = [i for i in p2 if i not in part_set]
+
+        # child
+        new_population.append(Solution(rest_part[:start] + part + rest_part[start:]))
+
+    return new_population
+
+# swap mutation with mutation probability factor mutation_prob
+def mutation(new_population: List[Solution], mutation_prob, no_mutations):
+    for solution in new_population:
+        if random() < mutation_prob:
+            to_swap = [
+                sample(range(len(solution)), 2)
+                for _ in range(ceil(len(solution) * no_mutations))
+            ]
+            for swap in to_swap:
+                solution[swap[0]], solution[swap[1]] = (
+                    solution[swap[1]],
+                    solution[swap[0]],
+                )
+
+
+# elite is number of best solutions (based on fitness) that will be transfered to next population
+def population_selection(
+    pop_size, population: List[Solution], new_population: List[Solution], elite
+):
+    mixed_populations = population + new_population
+    p = np.array([float(solution.score) for solution in mixed_populations])
+    p /= p.sum()
+    mixed_pop_range = list(range(pop_size * 2))
+
+    # choosing population size - elite of solution that will be moved to next population
+    # number of elite places (in next_population) reserved for the best scores to ensure their survival (elite < pop_size)
+    next_population_choice = np.random.choice(
+        a=mixed_pop_range, size=pop_size - elite, p=p
+    )
+    next_population = [mixed_populations[i] for i in next_population_choice]
+
+    # picking elite
+    mixed_populations.sort(key=lambda x: x.score, reverse=True)
+    next_population.extend(mixed_populations[:elite])
+
+    return next_population
+
+# genetic function returns best solution in population in the last generation
+def genetic(
+    storage: Storage,
+    no_generations,
+    pop_size,
+    elite,
+    mutation_prob,
+    no_mutations,
+    greedy_injection=None,
+):
+    population = initialization(pop_size, storage, greedy_injection)
+    fitness(population, storage)
+
+    for _ in tqdm(range(no_generations)):
+        pairs = parent_selection(pop_size, population)
+        new_population = crossover(pairs, population)
+        mutation(new_population, mutation_prob, no_mutations)
+        fitness(new_population, storage)
+        population = population_selection(pop_size, population, new_population, elite)
+
+    return max(population, key=lambda x: x.score)

@@ -1,16 +1,19 @@
 #!/bin/bash
 
-python ./genetic.py
-echo
+echo "Compiling tester.cpp"
+g++ -Wall -o main.exe tester.cpp
+echo "Done"
 
+echo "Running computations"
+python ./scanner.py
+echo "Done"
+
+echo -e "Running checks\n"
 for filename in ./data/*.txt; do
-    #if [[ $filename == "./data/d_tough_choices.txt" ]]; then 
-    #    continue; 
-    #fi; 
-
     echo $filename
 
     ./main.exe "$filename" "solutions/$(basename "$filename" .txt).txt"; 
 
     echo
 done
+echo "Done"

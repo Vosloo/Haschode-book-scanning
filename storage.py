@@ -2,44 +2,45 @@ from library import Library
 
 
 class Storage:
-    def __init__(self, file_name) -> None:
+    def __init__(self, file_name, init_sort=True):
         self.file_name = file_name
-        self.book_count = 0
-        self.lib_count = 0
-        self.days_avail = 0
-        self.weights = []
-        
-        self.scanned = []
-        self.signed_libs = []
-        self.libraries: list[Library] = []
-        self.read_input()
+        self.book_count = None
+        self.lib_count = None
+        self.no_days = None
+        self.book_scores = None
+        self.libraries: list[Library] = list()
+        self.init_sort = init_sort
+        self.read_file()
 
     def __getitem__(self, key):
         return self.libraries[key]
 
-    def read_input(self):
+    def read_file(self):
         with open(self.file_name, "r") as f:
-            # Scanning info
-            self.book_count, self.lib_count, self.days_avail = list(
-                map(int, f.readline().split())
-            )
-            self.weights = list(map(int, f.readline().split()))
-            # self.scanned = [False] * len(self.weights)
+            data = f.readlines()
 
-            library_ind = 0
-            for line in f:
-                if not line.strip():
-                    # Empty line
+        self.book_count, self.lib_count, self.no_days = list(
+            map(int, data[0].strip().split())
+        )
+        self.book_scores = list(map(int, data[1].strip().split()))
+
+        if self.init_sort:
+            for line in range(2, len(data), 2):
+                if not data[line].strip():
                     break
 
-                # Library info
-                self.libraries.append(Library(*list(map(int, line.split()))))
-
-                # Books in library
-                self.libraries[library_ind].set_books(
-                    list(map(int, f.readline().split()))
+                lib_info = list(map(int, data[line].strip().split()))
+                books = sorted(
+                    list(map(int, data[line + 1].strip().split())),
+                    key=lambda x: self.book_scores[x],
+                    reverse=True,
                 )
-                library_ind += 1
+                self.libraries.append(Library(*lib_info, books))
+        else:
+            for line in range(2, len(data), 2):
+                if not data[line].strip():
+                    break
 
-    def add_scanned_book(self, book):
-        self.scanned.append(book)
+                lib_info = list(map(int, data[line].strip().split()))
+                books = list(map(int, data[line + 1].strip().split()))
+                self.libraries.append(Library(*lib_info, books))
